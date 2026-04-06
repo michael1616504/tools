@@ -1,0 +1,9 @@
+{
+  "name": "tax-doc-classifier-api",
+  "version": "1.0.0",
+  "description": "Azure Functions API for tax document classifier and PDF toolkit",
+  "dependencies": {
+    "pdf-lib": "^1.17.1",
+    "sharp": "^0.33.2"
+  }
+}
