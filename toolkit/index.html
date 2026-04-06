@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PDF Toolkit — Repair &amp; Convert</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f6f8; color: #1a1a2e; padding: 24px; }
+  h1 { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+  .subtitle { color: #666; font-size: 13px; margin-bottom: 20px; }
+  .tabs { display: flex; gap: 2px; margin-bottom: 0; }
+  .tab { padding: 10px 24px; background: #e0e2e8; border: none; border-radius: 8px 8px 0 0; cursor: pointer; font-size: 14px; font-weight: 600; color: #555; transition: all 0.15s; }
+  .tab.active { background: #fff; color: #1a1a2e; box-shadow: 0 -2px 6px rgba(0,0,0,0.06); }
+  .panel { background: #fff; border-radius: 0 8px 8px 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); padding: 24px; min-height: 400px; }
+  .drop-zone { border: 2px dashed #c0c4cc; border-radius: 8px; padding: 48px 24px; text-align: center; cursor: pointer; transition: all 0.2s; margin-bottom: 16px; }
+  .drop-zone:hover, .drop-zone.drag-over { border-color: #4a6cf7; background: #f0f4ff; }
+  .drop-zone p { font-size: 15px; color: #666; }
+  .drop-zone .icon { font-size: 36px; margin-bottom: 8px; }
+  .file-list { margin: 16px 0; max-height: 300px; overflow-y: auto; }
+  .file-item { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-radius: 6px; margin-bottom: 4px; font-size: 13px; }
+  .file-item:nth-child(odd) { background: #f8f9fb; }
+  .file-item .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 12px; }
+  .file-item .size { color: #888; font-size: 12px; white-space: nowrap; margin-right: 12px; }
+  .file-item .status { font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .file-item .status.repaired { color: #e67e22; }
+  .file-item .status.clean { color: #27ae60; }
+  .file-item .status.converted { color: #3498db; }
+  .file-item .status.error { color: #e74c3c; }
+  .file-item .remove { background: none; border: none; color: #ccc; cursor: pointer; font-size: 16px; padding: 0 4px; }
+  .file-item .remove:hover { color: #e74c3c; }
+  .actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .btn { padding: 10px 20px; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-primary { background: #4a6cf7; color: #fff; }
+  .btn-primary:hover:not(:disabled) { background: #3a5ce5; }
+  .btn-secondary { background: #e8eaef; color: #444; }
+  .btn-secondary:hover:not(:disabled) { background: #dcdfe6; }
+  .btn-danger { background: #fee; color: #c0392b; }
+  .btn-danger:hover:not(:disabled) { background: #fdd; }
+  .stats { font-size: 13px; color: #888; }
+  .toast { position: fixed; bottom: 24px; right: 24px; background: #1a1a2e; color: #fff; padding: 12px 20px; border-radius: 8px; font-size: 14px; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 999; }
+  .toast.show { opacity: 1; }
+  .hidden { display: none; }
+  .info-box { background: #f0f4ff; border-left: 3px solid #4a6cf7; padding: 12px 16px; border-radius: 0 6px 6px 0; margin-bottom: 16px; font-size: 13px; color: #444; line-height: 1.5; }
+  input[type="file"] { display: none; }
+  .option-row { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; font-size: 13px; }
+  .option-row label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .option-row select { padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; }
+</style>
+</head>
+<body>
+
+<h1>PDF Toolkit</h1>
+<p class="subtitle">Repair corrupt PDFs &amp; convert images (HEIC / JPG / PNG) to PDF</p>
+<p class="subtitle" id="mode-indicator" style="margin-top:2px"></p>
+
+<div class="tabs">
+  <button class="tab active" onclick="switchTab('repair')">🔧 Repair PDFs</button>
+  <button class="tab" onclick="switchTab('convert')">🖼️ Image → PDF</button>
+</div>
+
+<!-- REPAIR PANEL -->
+<div class="panel" id="panel-repair">
+  <div class="info-box">
+    Drop corrupt PDFs here. The tool strips invalid data appended after %%EOF (from iLovePDF, Canon scanners, bad merges, CaseWare drag-and-drop) that causes blank pages or "unable to open" errors. When running on Azure, deep repair can recover pages from scrambled cross-references. Clean files pass through unchanged.
+  </div>
+  <div class="drop-zone" id="drop-repair" onclick="document.getElementById('input-repair').click()">
+    <div class="icon">📄</div>
+    <p>Drop PDF files here or click to browse</p>
+  </div>
+  <input type="file" id="input-repair" accept=".pdf" multiple>
+  <div class="file-list" id="list-repair"></div>
+  <div class="actions">
+    <button class="btn btn-primary" id="btn-repair" onclick="processRepair()" disabled>🔧 Repair &amp; Download</button>
+    <button class="btn btn-danger" onclick="clearList('repair')" id="clear-repair" style="display:none">Clear all</button>
+    <span class="stats" id="stats-repair"></span>
+  </div>
+</div>
+
+<!-- CONVERT PANEL -->
+<div class="panel hidden" id="panel-convert">
+  <div class="info-box">
+    Drop HEIC, JPG, or PNG images. Each image becomes a full-page PDF, or combine all into one multi-page PDF.
+  </div>
+  <div class="option-row">
+    <label><input type="radio" name="convertMode" value="individual" checked> One PDF per image</label>
+    <label><input type="radio" name="convertMode" value="combined"> Combine into one PDF</label>
+    <label>Page size:
+      <select id="pageSize">
+        <option value="letter">Letter (8.5 × 11)</option>
+        <option value="a4">A4</option>
+        <option value="fit">Fit to image</option>
+      </select>
+    </label>
+  </div>
+  <div class="drop-zone" id="drop-convert" onclick="document.getElementById('input-convert').click()">
+    <div class="icon">🖼️</div>
+    <p>Drop HEIC, JPG, or PNG files here or click to browse</p>
+  </div>
+  <input type="file" id="input-convert" accept=".heic,.heif,.jpg,.jpeg,.png,.webp" multiple>
+  <div class="file-list" id="list-convert"></div>
+  <div class="actions">
+    <button class="btn btn-primary" id="btn-convert" onclick="processConvert()" disabled>📄 Convert &amp; Download</button>
+    <button class="btn btn-danger" onclick="clearList('convert')" id="clear-convert" style="display:none">Clear all</button>
+    <span class="stats" id="stats-convert"></span>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ── State ── */
+const state = { repair: [], convert: [] };
+let serverAvailable = null; // null = untested, true/false after probe
+
+/* ── Server availability check ── */
+async function checkServer() {
+  if (serverAvailable !== null) return serverAvailable;
+  try {
+    const r = await fetch('/api/repair-pdf', { method: 'OPTIONS' });
+    serverAvailable = r.ok || r.status === 204;
+  } catch (e) { serverAvailable = false; }
+  const el = document.getElementById('mode-indicator');
+  el.textContent = serverAvailable ? '🟢 Server mode — deep repair & HEIC conversion available' : '🟡 Browser mode — basic repair & JPG/PNG conversion';
+  el.style.color = serverAvailable ? '#27ae60' : '#e67e22';
+  return serverAvailable;
+}
+checkServer();
+
+/* ── Tab switching ── */
+function switchTab(tab) {
+  document.querySelectorAll('.tab').forEach((t, i) => t.classList.toggle('active', (i === 0 && tab === 'repair') || (i === 1 && tab === 'convert')));
+  document.getElementById('panel-repair').classList.toggle('hidden', tab !== 'repair');
+  document.getElementById('panel-convert').classList.toggle('hidden', tab !== 'convert');
+}
+
+/* ── Toast ── */
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+/* ── Helpers ── */
+function fmtSize(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+  return (b / 1048576).toFixed(1) + ' MB';
+}
+
+function bufToBase64(buf) {
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
+function base64ToBuf(b64) {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
+
+/* ── Drop zone wiring ── */
+function wireDropZone(id, inputId, type) {
+  const zone = document.getElementById(id);
+  const input = document.getElementById(inputId);
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+  zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('drag-over'); addFiles(type, e.dataTransfer.files); });
+  input.addEventListener('change', () => { addFiles(type, input.files); input.value = ''; });
+}
+
+function addFiles(type, files) {
+  for (const f of files) {
+    if (type === 'repair' && !f.name.toLowerCase().endsWith('.pdf')) continue;
+    if (type === 'convert' && !/\.(heic|heif|jpe?g|png|webp|tiff?)$/i.test(f.name)) continue;
+    state[type].push({ file: f, status: null, result: null, message: null });
+  }
+  renderList(type);
+}
+
+function clearList(type) {
+  state[type] = [];
+  renderList(type);
+}
+
+function removeItem(type, idx) {
+  state[type].splice(idx, 1);
+  renderList(type);
+}
+
+function renderList(type) {
+  const list = document.getElementById('list-' + type);
+  const btn = document.getElementById('btn-' + type);
+  const clear = document.getElementById('clear-' + type);
+  list.innerHTML = state[type].map((item, i) => {
+    let statusHtml = '';
+    if (item.status === 'repaired') statusHtml = `<span class="status repaired" title="${item.message||''}">Repaired</span>`;
+    else if (item.status === 'clean') statusHtml = '<span class="status clean">Clean</span>';
+    else if (item.status === 'converted') statusHtml = '<span class="status converted">Converted</span>';
+    else if (item.status === 'error') statusHtml = `<span class="status error" title="${item.message||''}">Error</span>`;
+    else if (item.status === 'processing') statusHtml = '<span class="status" style="color:#888">⏳</span>';
+    return `<div class="file-item"><span class="name" title="${item.file.name}">${item.file.name}</span><span class="size">${fmtSize(item.file.size)}</span>${statusHtml}<button class="remove" onclick="removeItem('${type}',${i})" title="Remove">×</button></div>`;
+  }).join('');
+  btn.disabled = state[type].length === 0;
+  clear.style.display = state[type].length > 0 ? '' : 'none';
+}
+
+wireDropZone('drop-repair', 'input-repair', 'repair');
+wireDropZone('drop-convert', 'input-convert', 'convert');
+
+/* ══════════════════════════════════════
+   PDF REPAIR
+   ══════════════════════════════════════ */
+
+/* Browser-only repair: truncate at valid %%EOF */
+function repairPdfBytesLocal(buf) {
+  const bytes = new Uint8Array(buf);
+  if (bytes.length < 10 || bytes[0] !== 0x25 || bytes[1] !== 0x50) return { buf, repaired: false };
+  const eofs = [];
+  for (let i = 0; i <= bytes.length - 5; i++) {
+    if (bytes[i] === 0x25 && bytes[i+1] === 0x25 && bytes[i+2] === 0x45 && bytes[i+3] === 0x4F && bytes[i+4] === 0x46) eofs.push(i);
+  }
+  if (eofs.length <= 1) return { buf, repaired: false };
+  const head = new TextDecoder('latin1').decode(bytes.slice(0, Math.min(1024, bytes.length)));
+  const isLin = /\/Linearized\s/.test(head);
+  const realIdx = (isLin && eofs.length >= 2) ? 1 : 0;
+  if (realIdx === eofs.length - 1) return { buf, repaired: false };
+  const realEnd = eofs[realIdx] + 5;
+  let a = realEnd;
+  while (a < bytes.length && (bytes[a] === 0x0A || bytes[a] === 0x0D || bytes[a] === 0x20)) a++;
+  if (a >= bytes.length - 10) return { buf, repaired: false };
+  const after = new TextDecoder('latin1').decode(bytes.slice(a, Math.min(a + 40, bytes.length)));
+  const validUpdate = /^\d+\s+\d+\s+obj/.test(after) || after.startsWith('xref');
+  const appendedSample = new TextDecoder('latin1').decode(bytes.slice(realEnd, Math.min(realEnd + 50000, bytes.length)));
+  const corrupt = appendedSample.includes('iLovePDF') || (appendedSample.includes('/Type /Font') && /\/ColorSpace\s/.test(appendedSample));
+  if (!validUpdate || corrupt) {
+    let end = realEnd;
+    while (end < bytes.length && (bytes[end] === 0x0A || bytes[end] === 0x0D)) { end++; if (end - realEnd > 2) break; }
+    return { buf: bytes.slice(0, end).buffer, repaired: true, message: 'Browser repair: truncated corrupt appended data.' };
+  }
+  return { buf, repaired: false };
+}
+
+/* Server-side repair via Azure Function */
+async function repairPdfBytesServer(buf, filename) {
+  const resp = await fetch('/api/repair-pdf', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ file_base64: bufToBase64(buf), filename })
+  });
+  const json = await resp.json();
+  if (!resp.ok) throw new Error(json.error || 'Server repair failed');
+  return {
+    buf: base64ToBuf(json.file_base64),
+    repaired: json.repaired,
+    pages: json.pages,
+    message: json.message
+  };
+}
+
+async function processRepair() {
+  const btn = document.getElementById('btn-repair');
+  btn.disabled = true; btn.textContent = '⏳ Processing…';
+  const useServer = await checkServer();
+  let repairedCount = 0, cleanCount = 0, errorCount = 0;
+
+  try {
+    const useZip = state.repair.length > 1;
+    const zip = useZip ? new JSZip() : null;
+
+    for (const item of state.repair) {
+      item.status = 'processing';
+      renderList('repair');
+      try {
+        const raw = await item.file.arrayBuffer();
+        let result;
+
+        if (useServer) {
+          // Try server first — deep repair with sub-document extraction
+          try {
+            result = await repairPdfBytesServer(raw, item.file.name);
+          } catch (serverErr) {
+            console.warn('Server repair failed, falling back to browser:', serverErr);
+            result = repairPdfBytesLocal(raw);
+          }
+        } else {
+          result = repairPdfBytesLocal(raw);
+        }
+
+        item.result = result.buf;
+        item.status = result.repaired ? 'repaired' : 'clean';
+        item.message = result.message || '';
+        if (result.repaired) repairedCount++; else cleanCount++;
+        if (zip) zip.file(item.file.name, result.buf);
+
+      } catch (e) {
+        console.error(e);
+        item.status = 'error';
+        item.message = e.message;
+        errorCount++;
+      }
+      renderList('repair');
+    }
+
+    if (useZip) {
+      const blob = await zip.generateAsync({ type: 'blob' });
+      download(blob, 'repaired_pdfs.zip');
+    } else if (state.repair.length === 1 && state.repair[0].result) {
+      const blob = new Blob([state.repair[0].result], { type: 'application/pdf' });
+      download(blob, state.repair[0].file.name);
+    }
+
+    const parts = [];
+    if (repairedCount) parts.push(`${repairedCount} repaired`);
+    if (cleanCount) parts.push(`${cleanCount} clean`);
+    if (errorCount) parts.push(`${errorCount} errors`);
+    document.getElementById('stats-repair').textContent = parts.join(', ');
+    showToast(repairedCount ? `Done — ${repairedCount} PDF(s) repaired.` : 'Done — all files were clean.');
+
+  } catch (e) {
+    console.error(e);
+    showToast('Error during repair.');
+  }
+
+  btn.disabled = false; btn.textContent = '🔧 Repair & Download';
+}
+
+/* ══════════════════════════════════════
+   IMAGE → PDF CONVERSION
+   ══════════════════════════════════════ */
+
+// HEIC decoding via heic2any (browser fallback)
+let heicLoaded = false;
+async function ensureHeicDecoder() {
+  if (heicLoaded) return;
+  await new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/heic2any/0.0.4/heic2any.min.js';
+    s.onload = () => { heicLoaded = true; resolve(); };
+    s.onerror = reject;
+    document.head.appendChild(s);
+  });
+}
+
+/* Browser-only image → PDF */
+async function fileToImageBytes(file) {
+  let blob = file;
+  let type = file.type || '';
+  const ext = file.name.split('.').pop().toLowerCase();
+  if (ext === 'heic' || ext === 'heif' || type.includes('heic') || type.includes('heif')) {
+    await ensureHeicDecoder();
+    blob = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.92 });
+    if (Array.isArray(blob)) blob = blob[0];
+    type = 'image/jpeg';
+  }
+  const arrayBuf = await blob.arrayBuffer();
+  const bytes = new Uint8Array(arrayBuf);
+  if (bytes[0] === 0xFF && bytes[1] === 0xD8) return { bytes, format: 'jpg' };
+  if (bytes[0] === 0x89 && bytes[1] === 0x50) return { bytes, format: 'png' };
+  // Fallback: draw to canvas
+  const imgBlob = new Blob([bytes], { type: type || 'image/jpeg' });
+  const url = URL.createObjectURL(imgBlob);
+  const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+  URL.revokeObjectURL(url);
+  const canvas = document.createElement('canvas');
+  canvas.width = img.width; canvas.height = img.height;
+  canvas.getContext('2d').drawImage(img, 0, 0);
+  const jpegBlob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.92));
+  const jpegBuf = await jpegBlob.arrayBuffer();
+  return { bytes: new Uint8Array(jpegBuf), format: 'jpg' };
+}
+
+function getPageDims(pageSize) {
+  if (pageSize === 'a4') return { w: 595.28, h: 841.89 };
+  return { w: 612, h: 792 };
+}
+
+async function embedImageInPage(pdfDoc, imgData, pageSize) {
+  const { bytes, format } = imgData;
+  const img = format === 'png' ? await pdfDoc.embedPng(bytes) : await pdfDoc.embedJpg(bytes);
+  let pw, ph;
+  if (pageSize === 'fit') { pw = img.width; ph = img.height; }
+  else { const d = getPageDims(pageSize); pw = d.w; ph = d.h; }
+  const page = pdfDoc.addPage([pw, ph]);
+  if (pageSize === 'fit') { page.drawImage(img, { x: 0, y: 0, width: pw, height: ph }); }
+  else {
+    const m = 18, maxW = pw - m*2, maxH = ph - m*2;
+    const scale = Math.min(maxW / img.width, maxH / img.height, 1);
+    const dw = img.width * scale, dh = img.height * scale;
+    page.drawImage(img, { x: (pw-dw)/2, y: (ph-dh)/2, width: dw, height: dh });
+  }
+}
+
+/* Server-side image → PDF */
+async function convertImageServer(file, pageSize) {
+  const buf = await file.arrayBuffer();
+  const resp = await fetch('/api/convert-image', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ file_base64: bufToBase64(buf), filename: file.name, page_size: pageSize })
+  });
+  const json = await resp.json();
+  if (!resp.ok) throw new Error(json.error || 'Server conversion failed');
+  return { pdfBytes: new Uint8Array(base64ToBuf(json.file_base64)), filename: json.filename, message: json.message };
+}
+
+async function processConvert() {
+  const btn = document.getElementById('btn-convert');
+  btn.disabled = true; btn.textContent = '⏳ Converting…';
+  const useServer = await checkServer();
+  const mode = document.querySelector('input[name="convertMode"]:checked').value;
+  const pageSize = document.getElementById('pageSize').value;
+  let convertedCount = 0, errorCount = 0;
+
+  try {
+    if (mode === 'combined') {
+      // Combined: must build locally even with server (server does one file at a time)
+      // But we can use server for individual image decoding if HEIC
+      const pdfDoc = await PDFLib.PDFDocument.create();
+      for (const item of state.convert) {
+        item.status = 'processing'; renderList('convert');
+        try {
+          if (useServer) {
+            // Convert each image on server, then extract the page
+            const { pdfBytes } = await convertImageServer(item.file, pageSize);
+            const srcDoc = await PDFLib.PDFDocument.load(pdfBytes);
+            const [copied] = await pdfDoc.copyPages(srcDoc, [0]);
+            pdfDoc.addPage(copied);
+          } else {
+            const imgData = await fileToImageBytes(item.file);
+            await embedImageInPage(pdfDoc, imgData, pageSize);
+          }
+          item.status = 'converted'; convertedCount++;
+        } catch (e) {
+          // If server fails, try browser fallback
+          try {
+            const imgData = await fileToImageBytes(item.file);
+            await embedImageInPage(pdfDoc, imgData, pageSize);
+            item.status = 'converted'; convertedCount++;
+          } catch (e2) {
+            console.error(item.file.name, e2);
+            item.status = 'error'; item.message = e2.message; errorCount++;
+          }
+        }
+        renderList('convert');
+      }
+      const pdfBytes = await pdfDoc.save({ useObjectStreams: false });
+      download(new Blob([pdfBytes], { type: 'application/pdf' }), 'combined.pdf');
+
+    } else {
+      // Individual PDFs
+      const useZip = state.convert.length > 1;
+      const zip = useZip ? new JSZip() : null;
+
+      for (const item of state.convert) {
+        item.status = 'processing'; renderList('convert');
+        try {
+          let pdfBytes, pdfName;
+
+          if (useServer) {
+            try {
+              const result = await convertImageServer(item.file, pageSize);
+              pdfBytes = result.pdfBytes;
+              pdfName = result.filename;
+            } catch (serverErr) {
+              // Fallback to browser
+              const pdfDoc = await PDFLib.PDFDocument.create();
+              const imgData = await fileToImageBytes(item.file);
+              await embedImageInPage(pdfDoc, imgData, pageSize);
+              pdfBytes = await pdfDoc.save({ useObjectStreams: false });
+              pdfName = item.file.name.replace(/\.[^.]+$/, '.pdf');
+            }
+          } else {
+            const pdfDoc = await PDFLib.PDFDocument.create();
+            const imgData = await fileToImageBytes(item.file);
+            await embedImageInPage(pdfDoc, imgData, pageSize);
+            pdfBytes = await pdfDoc.save({ useObjectStreams: false });
+            pdfName = item.file.name.replace(/\.[^.]+$/, '.pdf');
+          }
+
+          item.status = 'converted'; convertedCount++;
+          if (zip) { zip.file(pdfName, pdfBytes); }
+          else { download(new Blob([pdfBytes], { type: 'application/pdf' }), pdfName); }
+
+        } catch (e) {
+          console.error(item.file.name, e);
+          item.status = 'error'; item.message = e.message; errorCount++;
+        }
+        renderList('convert');
+      }
+
+      if (zip) {
+        download(await zip.generateAsync({ type: 'blob' }), 'converted_pdfs.zip');
+      }
+    }
+
+    const parts = [];
+    if (convertedCount) parts.push(`${convertedCount} converted`);
+    if (errorCount) parts.push(`${errorCount} errors`);
+    document.getElementById('stats-convert').textContent = parts.join(', ');
+    showToast(`Done — ${convertedCount} image(s) converted to PDF.`);
+
+  } catch (e) {
+    console.error(e);
+    showToast('Error during conversion.');
+  }
+
+  btn.disabled = false; btn.textContent = '📄 Convert & Download';
+}
+
+/* ── Download helper ── */
+function download(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+</script>
+</body>
+</html>
